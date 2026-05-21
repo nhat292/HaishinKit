@@ -29,7 +29,7 @@ extension AVCaptureDevice.Format {
             if range.contains(frameRate: frameRate) {
                 return true
             }
-            return false
+            // Continue checking other ranges instead of returning false immediately.
         }
         let diff = frameRates.map { abs($0 - frameRate) }
         if let minElement = diff.min() {
