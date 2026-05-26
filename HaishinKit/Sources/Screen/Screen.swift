@@ -22,6 +22,13 @@ public final class Screen: ScreenObjectContainerConvertible {
 
     private static let lockFlags = CVPixelBufferLockFlags(rawValue: 0)
     private static let preferredTimescale: CMTimeScale = 1000000000
+    // Pre-allocate 6 pixel buffers: 3 in Core Image GPU pipeline + 2 in VideoToolbox encoder
+    // + 1 being written. Without a minimum, the pool allocates on demand inside the render
+    // loop at 60fps, adding heap allocation latency to every frame.
+    private static let poolMinBufferCount: Int = 6
+    private static let poolAttributes: CFDictionary = [
+        kCVPixelBufferPoolMinimumBufferCountKey as String: poolMinBufferCount
+    ] as CFDictionary
 
     /// The total of child counts.
     public var childCounts: Int {
@@ -38,7 +45,7 @@ public final class Screen: ScreenObjectContainerConvertible {
                 return
             }
             renderer.bounds = .init(origin: .zero, size: size)
-            CVPixelBufferPoolCreate(nil, nil, dynamicRangeMode.makePixelBufferAttributes(size), &pixelBufferPool)
+            CVPixelBufferPoolCreate(nil, Self.poolAttributes, dynamicRangeMode.makePixelBufferAttributes(size), &pixelBufferPool)
         }
     }
 
@@ -78,7 +85,7 @@ public final class Screen: ScreenObjectContainerConvertible {
                 return
             }
             renderer = ScreenRendererByGPU(dynamicRangeMode: dynamicRangeMode)
-            CVPixelBufferPoolCreate(nil, nil, dynamicRangeMode.makePixelBufferAttributes(size), &pixelBufferPool)
+            CVPixelBufferPoolCreate(nil, Self.poolAttributes, dynamicRangeMode.makePixelBufferAttributes(size), &pixelBufferPool)
         }
     }
     private(set) var renderer: (any ScreenRenderer) = ScreenRendererByGPU(dynamicRangeMode: .sdr) {
@@ -103,7 +110,7 @@ public final class Screen: ScreenObjectContainerConvertible {
     /// Creates a screen object.
     public init() {
         try? addChild(videoTrackScreenObject)
-        CVPixelBufferPoolCreate(nil, nil, dynamicRangeMode.makePixelBufferAttributes(size), &pixelBufferPool)
+        CVPixelBufferPoolCreate(nil, Self.poolAttributes, dynamicRangeMode.makePixelBufferAttributes(size), &pixelBufferPool)
     }
 
     /// Adds the specified screen object as a child of the current screen object container.
