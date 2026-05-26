@@ -22,10 +22,10 @@ public final class Screen: ScreenObjectContainerConvertible {
 
     private static let lockFlags = CVPixelBufferLockFlags(rawValue: 0)
     private static let preferredTimescale: CMTimeScale = 1000000000
-    // Pre-allocate 6 pixel buffers: 3 in Core Image GPU pipeline + 2 in VideoToolbox encoder
-    // + 1 being written. Without a minimum, the pool allocates on demand inside the render
-    // loop at 60fps, adding heap allocation latency to every frame.
-    private static let poolMinBufferCount: Int = 6
+    // Pre-allocate 12 pixel buffers: VideoToolbox holds ≤4 frames in its encode pipeline,
+    // the compositor needs 2 (current + previous), and display-link double-buffering needs 2.
+    // 12 gives a safe margin so the pool never exhausts during encoder back-pressure at 60fps.
+    private static let poolMinBufferCount: Int = 12
     private static let poolAttributes: CFDictionary = [
         kCVPixelBufferPoolMinimumBufferCountKey as String: poolMinBufferCount
     ] as CFDictionary
@@ -194,20 +194,25 @@ public final class Screen: ScreenObjectContainerConvertible {
     }
 
     func render(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer {
-        try? sampleBuffer.imageBuffer?.lockBaseAddress(Self.lockFlags)
-        defer {
-            try? sampleBuffer.imageBuffer?.unlockBaseAddress(Self.lockFlags)
+        // autoreleasepool drains the CIImage intermediate objects created during compositing
+        // on every frame. Without it they accumulate until the run loop drains (at ~60fps with
+        // 4 overlay objects this can grow 50+ MB before the next drain opportunity).
+        return autoreleasepool {
+            try? sampleBuffer.imageBuffer?.lockBaseAddress(Self.lockFlags)
+            defer {
+                try? sampleBuffer.imageBuffer?.unlockBaseAddress(Self.lockFlags)
+            }
+            renderer.presentationTimeStamp = sampleBuffer.presentationTimeStamp
+            renderer.setTarget(sampleBuffer.imageBuffer)
+            if let dimensions = sampleBuffer.formatDescription?.dimensions {
+                root.size = dimensions.size
+            }
+            delegate?.screen(self, willLayout: sampleBuffer.presentationTimeStamp)
+            root.layout(renderer)
+            root.draw(renderer)
+            renderer.render()
+            return sampleBuffer
         }
-        renderer.presentationTimeStamp = sampleBuffer.presentationTimeStamp
-        renderer.setTarget(sampleBuffer.imageBuffer)
-        if let dimensions = sampleBuffer.formatDescription?.dimensions {
-            root.size = dimensions.size
-        }
-        delegate?.screen(self, willLayout: sampleBuffer.presentationTimeStamp)
-        root.layout(renderer)
-        root.draw(renderer)
-        renderer.render()
-        return sampleBuffer
     }
 
     func setVideoCaptureLatency(_ presentationTimeStamp: CMTime) {
