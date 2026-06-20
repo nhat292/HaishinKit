@@ -86,42 +86,21 @@ public final class ImageScreenObject: ScreenObject {
     private var source: String?
 
     override public func makeImage(_ renderer: some ScreenRenderer) -> CIImage? {
-        let intersection = bounds.intersection(renderer.bounds)
-
-        guard bounds != intersection else {
-            if let ciImage {
-                return ciImage.transformed(by: .init(scaleX: size.width / ciImage.extent.width, y: size.height / ciImage.extent.height))
-            } else {
-                return nil
-            }
-        }
-
-        // Handling when the drawing area is exceeded.
-        let x: CGFloat
-        switch horizontalAlignment {
-        case .left:
-            x = bounds.origin.x
-        case .center:
-            x = bounds.origin.x / 2
-        case .right:
-            x = 0.0
-        }
-
-        let y: CGFloat
-        switch verticalAlignment {
-        case .top:
-            y = 0.0
-        case .middle:
-            y = abs(bounds.origin.y) / 2
-        case .bottom:
-            y = abs(bounds.origin.y)
-        }
-
-        if let ciImage = ciImage?.cropped(to: .init(origin: .init(x: x, y: y), size: intersection.size)) {
-            return ciImage
-        } else {
+        guard let ciImage, ciImage.extent.width > 0, ciImage.extent.height > 0 else {
             return nil
         }
+        // Scale the source image to the object's layout size and let the renderer composite it.
+        // Any part that extends beyond the canvas is clipped naturally when the final CIImage is
+        // rendered into the (canvas-sized) pixel buffer — there is no need to special-case the
+        // "drawing area exceeded" path. The previous implementation tried to crop/reposition the
+        // image for right/center/bottom-aligned objects and produced an empty (invisible) image
+        // whenever the bounds touched a canvas edge, which is exactly the case for corner logos.
+        //
+        // A zero `size` component means "use the image's natural extent" (see makeBounds), so we
+        // fall back to a scale of 1 for that axis instead of dividing by it (which would yield 0).
+        let scaleX = size.width == 0 ? 1 : size.width / ciImage.extent.width
+        let scaleY = size.height == 0 ? 1 : size.height / ciImage.extent.height
+        return ciImage.transformed(by: .init(scaleX: scaleX, y: scaleY))
     }
 
     override public func makeBounds(_ size: CGSize) -> CGRect {
